@@ -75,7 +75,7 @@ async def run_cli(config: Config) -> None:
                         console.print()
                         in_thinking = False
                     for tc in event.tool_calls:
-                        console.print(f"\n[bold yellow]Tool: {tc.name}[/bold yellow]")
+                        console.print(f"\n[bold yellow]🔧 {tc.name}[/bold yellow]")
                         for k, v in tc.arguments.items():
                             console.print(f"  {k}: {v}")
 
