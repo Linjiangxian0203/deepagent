@@ -1,16 +1,8 @@
 # src/deepagent/config.py
-from dataclasses import dataclass
 import os
 
 
-@dataclass
 class Config:
-    api_key: str = ""
-    base_url: str = "https://api.deepseek.com"
-    model: str = "deepseek-chat"
-    max_iterations: int = 50
-    max_tools_per_turn: int = 10
-
     def __init__(self, _env: dict[str, str] | None = None):
         env = _env if _env is not None else os.environ
         self.api_key = env.get("DEEPSEEK_API_KEY", "")

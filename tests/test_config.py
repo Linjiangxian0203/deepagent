@@ -1,5 +1,4 @@
 # tests/test_config.py
-import os
 import pytest
 from deepagent.config import Config
 
@@ -38,3 +37,18 @@ def test_config_max_iterations_default():
 def test_config_max_tools_per_turn_default():
     cfg = Config(_env={"DEEPSEEK_API_KEY": "sk-test"})
     assert cfg.max_tools_per_turn == 10
+
+
+def test_config_custom_base_url():
+    cfg = Config(_env={"DEEPSEEK_API_KEY": "sk-test", "DEEPSEEK_BASE_URL": "https://custom.api.com"})
+    assert cfg.base_url == "https://custom.api.com"
+
+
+def test_config_custom_max_iterations():
+    cfg = Config(_env={"DEEPSEEK_API_KEY": "sk-test", "DEEPSEEK_MAX_ITERATIONS": "100"})
+    assert cfg.max_iterations == 100
+
+
+def test_config_custom_max_tools_per_turn():
+    cfg = Config(_env={"DEEPSEEK_API_KEY": "sk-test", "DEEPSEEK_MAX_TOOLS_PER_TURN": "25"})
+    assert cfg.max_tools_per_turn == 25
