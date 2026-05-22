@@ -1,5 +1,6 @@
 # src/deepagent/cli/app.py
 import asyncio
+import sys
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
@@ -13,9 +14,19 @@ from deepagent.core.llm_client import LLMClient
 from deepagent.core.events import TextDelta, ThinkingDelta, ToolCallEvent
 
 
+def _safe_print(console: Console, text: str, **kwargs) -> None:
+    """Print text safely, handling Windows encoding issues."""
+    try:
+        console.print(text, **kwargs)
+    except UnicodeEncodeError:
+        # On Windows GBK terminals, strip characters that can't be encoded
+        encoded = text.encode(sys.stdout.encoding or "utf-8", errors="replace")
+        console.print(encoded.decode(sys.stdout.encoding or "utf-8"), **kwargs)
+
+
 async def run_cli(config: Config) -> None:
     """Main CLI loop: prompt for input, stream response, repeat."""
-    console = Console()
+    console = Console(force_terminal=True)
     client = LLMClient(config)
     session = PromptSession()
 
@@ -60,15 +71,14 @@ async def run_cli(config: Config) -> None:
                         in_thinking = True
                         console.print()
                     thinking_parts.append(event.text)
-                    # Render thinking in dim style
-                    console.print(f"[dim]{event.text}[/dim]", end="")
+                    _safe_print(console, f"[dim]{event.text}[/dim]", end="")
 
                 elif isinstance(event, TextDelta):
                     if in_thinking:
                         console.print()  # end thinking line
                         in_thinking = False
                     response_text_parts.append(event.text)
-                    console.print(event.text, end="")
+                    _safe_print(console, event.text, end="")
 
                 elif isinstance(event, ToolCallEvent):
                     if in_thinking:
@@ -77,7 +87,7 @@ async def run_cli(config: Config) -> None:
                     for tc in event.tool_calls:
                         console.print(f"\n[bold yellow]🔧 {tc.name}[/bold yellow]")
                         for k, v in tc.arguments.items():
-                            console.print(f"  {k}: {v}")
+                            _safe_print(console, f"  {k}: {v}")
 
             console.print()  # final newline
 
