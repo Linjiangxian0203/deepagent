@@ -14,6 +14,7 @@ def create_shell_tools(registry: ToolRegistry) -> list:
         safety_level=SafetyLevel.SHELL,
     )
     async def run_shell(command: str, cwd: str = "", timeout: int = 120) -> dict:
+        proc = None
         try:
             working_dir = cwd if cwd else os.getcwd()
             proc = await asyncio.create_subprocess_shell(
@@ -47,6 +48,12 @@ def create_shell_tools(registry: ToolRegistry) -> list:
                 },
             }
         except asyncio.TimeoutError:
+            if proc is not None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
             return {
                 "success": False,
                 "content": "",
@@ -54,6 +61,12 @@ def create_shell_tools(registry: ToolRegistry) -> list:
                 "metadata": None,
             }
         except Exception as e:
+            if proc is not None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
             return {
                 "success": False,
                 "content": "",
