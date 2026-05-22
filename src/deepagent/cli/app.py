@@ -1,5 +1,4 @@
 # src/deepagent/cli/app.py
-import asyncio
 import sys
 
 from prompt_toolkit import PromptSession
@@ -11,7 +10,8 @@ from deepagent.core.llm_client import LLMClient
 from deepagent.core.loop import AgentLoop, ConfirmationHandler
 from deepagent.core.events import (
     TextDelta, ThinkingDelta, ToolCallEvent,
-    ToolCallStartEvent, ToolResultEvent, DoneEvent,
+    ToolCallStartEvent, ToolResultEvent, ToolLimitEvent,
+    InterruptedEvent, DoneEvent,
 )
 from deepagent.tools.registry import ToolRegistry
 from deepagent.tools.file_tools import create_file_tools
@@ -31,9 +31,8 @@ def _safe_print(console: Console, text: str, **kwargs) -> None:
 class TerminalConfirmationHandler(ConfirmationHandler):
     """Prompt the user for y/N confirmation before executing shell-level tools."""
 
-    def __init__(self, session: PromptSession, console: Console):
+    def __init__(self, session: PromptSession):
         self._session = session
-        self._console = console
 
     async def confirm(self, tool_name: str, arguments: dict) -> bool:
         args_summary = " ".join(f"{k}={repr(v)}" for k, v in arguments.items())
@@ -62,7 +61,7 @@ async def run_cli(config: Config) -> None:
     session = PromptSession()
 
     # Confirmation handler (triggers only for shell-level tools)
-    confirm_handler = TerminalConfirmationHandler(session, console)
+    confirm_handler = TerminalConfirmationHandler(session)
 
     # AgentLoop
     loop = AgentLoop(config, llm_client, tool_registry, confirm_handler=confirm_handler)
@@ -132,6 +131,9 @@ async def run_cli(config: Config) -> None:
                 elif isinstance(event, ToolCallStartEvent):
                     console.print(f"[dim]Running {event.tool_call.name}...[/dim]")
 
+                elif isinstance(event, ToolLimitEvent):
+                    _safe_print(console, f"[bold yellow]Too many tool calls requested, limiting to {config.max_tools_per_turn}[/bold yellow]")
+
                 elif isinstance(event, ToolResultEvent):
                     result = event.result
                     if result.success:
@@ -150,6 +152,9 @@ async def run_cli(config: Config) -> None:
                         _safe_print(
                             console, f"[bold red]Error:[/bold red] {result.error}"
                         )
+
+                elif isinstance(event, InterruptedEvent):
+                    _safe_print(console, f"\n[dim]Interrupted.[/dim]")
 
                 elif isinstance(event, DoneEvent):
                     console.print()
