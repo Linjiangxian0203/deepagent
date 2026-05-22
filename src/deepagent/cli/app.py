@@ -5,13 +5,18 @@ import sys
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
-from rich.live import Live
-from rich.markdown import Markdown
-from rich.panel import Panel
 
 from deepagent.config import Config
 from deepagent.core.llm_client import LLMClient
-from deepagent.core.events import TextDelta, ThinkingDelta, ToolCallEvent
+from deepagent.core.loop import AgentLoop, ConfirmationHandler
+from deepagent.core.events import (
+    TextDelta, ThinkingDelta, ToolCallEvent,
+    ToolCallStartEvent, ToolResultEvent, DoneEvent,
+)
+from deepagent.tools.registry import ToolRegistry
+from deepagent.tools.file_tools import create_file_tools
+from deepagent.tools.shell_tools import create_shell_tools
+from deepagent.tools.search_tools import create_search_tools
 
 
 def _safe_print(console: Console, text: str, **kwargs) -> None:
@@ -19,16 +24,48 @@ def _safe_print(console: Console, text: str, **kwargs) -> None:
     try:
         console.print(text, **kwargs)
     except UnicodeEncodeError:
-        # On Windows GBK terminals, strip characters that can't be encoded
         encoded = text.encode(sys.stdout.encoding or "utf-8", errors="replace")
         console.print(encoded.decode(sys.stdout.encoding or "utf-8"), **kwargs)
 
 
+class TerminalConfirmationHandler(ConfirmationHandler):
+    """Prompt the user for y/N confirmation before executing shell-level tools."""
+
+    def __init__(self, session: PromptSession, console: Console):
+        self._session = session
+        self._console = console
+
+    async def confirm(self, tool_name: str, arguments: dict) -> bool:
+        args_summary = " ".join(f"{k}={repr(v)}" for k, v in arguments.items())
+        prompt_text = (
+            f"[bold yellow]Execute `{tool_name} {args_summary}`? [y/N]: [/bold yellow]"
+        )
+
+        try:
+            answer = await self._session.prompt_async(prompt_text)
+            return answer.strip().lower() == "y"
+        except (EOFError, KeyboardInterrupt):
+            return False
+
+
 async def run_cli(config: Config) -> None:
-    """Main CLI loop: prompt for input, stream response, repeat."""
+    """CLI main loop: prompt input -> AgentLoop execution -> render results."""
     console = Console(force_terminal=True)
-    client = LLMClient(config)
+    llm_client = LLMClient(config)
+
+    # Build tool registry
+    tool_registry = ToolRegistry()
+    create_file_tools(tool_registry)
+    create_shell_tools(tool_registry)
+    create_search_tools(tool_registry)
+
     session = PromptSession()
+
+    # Confirmation handler (triggers only for shell-level tools)
+    confirm_handler = TerminalConfirmationHandler(session, console)
+
+    # AgentLoop
+    loop = AgentLoop(config, llm_client, tool_registry, confirm_handler=confirm_handler)
 
     # Key bindings: Ctrl+D to exit
     bindings = KeyBindings()
@@ -39,9 +76,8 @@ async def run_cli(config: Config) -> None:
 
     console.print("[bold cyan]Deepagent[/bold cyan] — CLI coding agent")
     console.print(f"Model: {config.model} | Base URL: {config.base_url}")
+    console.print(f"Tools: {', '.join(tool_registry.list_names())}")
     console.print("Type /exit or Ctrl+D to quit.\n")
-
-    messages: list[dict] = []
 
     while True:
         try:
@@ -57,43 +93,66 @@ async def run_cli(config: Config) -> None:
         if user_input.strip() == "/exit":
             break
 
-        messages.append({"role": "user", "content": user_input})
-
-        # Stream response
-        response_text_parts: list[str] = []
-        thinking_parts: list[str] = []
+        # Run AgentLoop and render events
         in_thinking = False
+        tool_phase = False
 
         try:
-            async for event in client.stream_chat(messages):
+            async for event in loop.run(user_input):
                 if isinstance(event, ThinkingDelta):
                     if not in_thinking:
                         in_thinking = True
                         console.print()
-                    thinking_parts.append(event.text)
                     _safe_print(console, f"[dim]{event.text}[/dim]", end="")
 
                 elif isinstance(event, TextDelta):
                     if in_thinking:
-                        console.print()  # end thinking line
+                        console.print()
                         in_thinking = False
-                    response_text_parts.append(event.text)
+                    if tool_phase:
+                        tool_phase = False
+                        console.print()
                     _safe_print(console, event.text, end="")
 
                 elif isinstance(event, ToolCallEvent):
                     if in_thinking:
                         console.print()
                         in_thinking = False
+                    tool_phase = True
+                    console.print()
                     for tc in event.tool_calls:
-                        console.print(f"\n[bold yellow]🔧 {tc.name}[/bold yellow]")
-                        for k, v in tc.arguments.items():
-                            _safe_print(console, f"  {k}: {v}")
+                        console.print(
+                            f"[bold yellow]🔧 {tc.name}[/bold yellow]", end=""
+                        )
+                        args = " ".join(
+                            f"{k}={repr(v)}" for k, v in tc.arguments.items()
+                        )
+                        _safe_print(console, f" {args}")
 
-            console.print()  # final newline
+                elif isinstance(event, ToolCallStartEvent):
+                    console.print(f"[dim]Running {event.tool_call.name}...[/dim]")
 
-            assistant_text = "".join(response_text_parts)
-            if assistant_text:
-                messages.append({"role": "assistant", "content": assistant_text})
+                elif isinstance(event, ToolResultEvent):
+                    result = event.result
+                    if result.success:
+                        content_preview = result.content[:500]
+                        if len(result.content) > 500:
+                            content_preview += (
+                                f"\n[dim]... ({len(result.content)} chars total)[/dim]"
+                            )
+                        _safe_print(console, content_preview)
+                        if result.metadata:
+                            meta_str = " ".join(
+                                f"{k}={v}" for k, v in result.metadata.items()
+                            )
+                            _safe_print(console, f"[dim]{meta_str}[/dim]")
+                    else:
+                        _safe_print(
+                            console, f"[bold red]Error:[/bold red] {result.error}"
+                        )
+
+                elif isinstance(event, DoneEvent):
+                    console.print()
 
         except Exception as e:
             console.print(f"\n[bold red]Error:[/bold red] {e}")
