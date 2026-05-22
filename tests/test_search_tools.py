@@ -92,3 +92,48 @@ async def test_glob_no_matches(registry_and_tools):
     result = await tool(pattern="*.js", path=tmp)
     assert result["success"] is True
     assert result["metadata"].get("file_count", -1) == 0
+
+
+@pytest.mark.asyncio
+async def test_grep_outside_safe_root(registry_and_tools):
+    registry, tools, tmp = registry_and_tools
+    tool = registry.get("grep")
+    result = await tool(pattern="test", path="/etc")
+    assert result["success"] is False
+    assert "outside" in result.get("error", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_glob_outside_safe_root(registry_and_tools):
+    registry, tools, tmp = registry_and_tools
+    tool = registry.get("glob")
+    result = await tool(pattern="*", path="/etc")
+    assert result["success"] is False
+    assert "outside" in result.get("error", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_grep_invalid_regex(registry_and_tools):
+    registry, tools, tmp = registry_and_tools
+    tool = registry.get("grep")
+    result = await tool(pattern="[unclosed", path=tmp)
+    assert result["success"] is False
+    assert "regex" in result.get("error", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_grep_path_not_found(registry_and_tools):
+    registry, tools, tmp = registry_and_tools
+    tool = registry.get("grep")
+    result = await tool(pattern="test", path=os.path.join(tmp, "nonexistent_dir"))
+    assert result["success"] is False
+    assert "not found" in result.get("error", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_glob_path_not_found(registry_and_tools):
+    registry, tools, tmp = registry_and_tools
+    tool = registry.get("glob")
+    result = await tool(pattern="*", path=os.path.join(tmp, "nonexistent_dir"))
+    assert result["success"] is False
+    assert "not found" in result.get("error", "").lower()

@@ -81,8 +81,9 @@ def create_search_tools(registry: ToolRegistry, safe_root: str | None = None) ->
                 return {"success": False, "content": "", "error": f"Path not found: {path}", "metadata": None}
 
             matches = list(search_dir.glob(pattern))
-            files = [str(m) for m in matches if m.is_file()]
-            dirs = [str(m) for m in matches if m.is_dir()]
+            safe_matches = [m for m in matches if _is_safe(str(m))]
+            files = [str(m) for m in safe_matches if m.is_file()]
+            dirs = [str(m) for m in safe_matches if m.is_dir()]
 
             lines = []
             if files:
