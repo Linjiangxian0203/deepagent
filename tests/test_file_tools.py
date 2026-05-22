@@ -67,9 +67,9 @@ async def test_read_file_with_offset_and_limit(registry_and_tools):
 
 @pytest.mark.asyncio
 async def test_read_file_not_found(registry_and_tools):
-    registry, tools, _ = registry_and_tools
+    registry, tools, tmp = registry_and_tools
     tool = registry.get("read_file")
-    result = await tool(path="/nonexistent/file.txt")
+    result = await tool(path=os.path.join(tmp, "nonexistent.txt"))
     assert result["success"] is False
     assert result["error"] is not None
 
@@ -130,4 +130,16 @@ async def test_edit_file_old_string_not_found(registry_and_tools):
 
     tool = registry.get("edit_file")
     result = await tool(path=filepath, old_string="not in file", new_string="replacement")
+    assert result["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_edit_file_duplicate_string(registry_and_tools):
+    registry, tools, tmp = registry_and_tools
+    filepath = os.path.join(tmp, "dup.txt")
+    with open(filepath, "w") as f:
+        f.write("hello\nhello\n")
+
+    tool = registry.get("edit_file")
+    result = await tool(path=filepath, old_string="hello", new_string="hi")
     assert result["success"] is False
