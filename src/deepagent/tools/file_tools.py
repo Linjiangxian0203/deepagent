@@ -21,7 +21,7 @@ def create_file_tools(registry: ToolRegistry, safe_root: str | None = None) -> l
         try:
             resolved = _resolve(path)
             if not os.path.isfile(resolved):
-                return {"success": False, "content": "", "error": f"File not found: {path}"}
+                return {"success": False, "content": "", "error": f"File not found: {path}", "metadata": None}
 
             with open(resolved, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
@@ -40,9 +40,9 @@ def create_file_tools(registry: ToolRegistry, safe_root: str | None = None) -> l
 
             return {"success": True, "content": content, "error": None, "metadata": metadata}
         except ValueError as e:
-            return {"success": False, "content": "", "error": str(e)}
+            return {"success": False, "content": "", "error": str(e), "metadata": None}
         except Exception as e:
-            return {"success": False, "content": "", "error": f"Error reading file: {e}"}
+            return {"success": False, "content": "", "error": f"Error reading file: {e}", "metadata": None}
 
     @tool(registry=registry, description="Create a new file or overwrite an existing file with the given content.", safety_level=SafetyLevel.WRITE)
     async def write_file(path: str, content: str) -> dict:
@@ -54,34 +54,34 @@ def create_file_tools(registry: ToolRegistry, safe_root: str | None = None) -> l
             file_size = os.path.getsize(resolved)
             return {"success": True, "content": f"File written: {path} ({file_size} bytes)", "error": None, "metadata": {"size": file_size}}
         except ValueError as e:
-            return {"success": False, "content": "", "error": str(e)}
+            return {"success": False, "content": "", "error": str(e), "metadata": None}
         except Exception as e:
-            return {"success": False, "content": "", "error": f"Error writing file: {e}"}
+            return {"success": False, "content": "", "error": f"Error writing file: {e}", "metadata": None}
 
     @tool(registry=registry, description="Replace a specific string in a file with a new string. The old_string must match exactly once.", safety_level=SafetyLevel.WRITE)
     async def edit_file(path: str, old_string: str, new_string: str) -> dict:
         try:
             resolved = _resolve(path)
             if not os.path.isfile(resolved):
-                return {"success": False, "content": "", "error": f"File not found: {path}"}
+                return {"success": False, "content": "", "error": f"File not found: {path}", "metadata": None}
 
             with open(resolved, "r", encoding="utf-8") as f:
                 content = f.read()
 
             count = content.count(old_string)
             if count == 0:
-                return {"success": False, "content": "", "error": f"old_string not found in file: {repr(old_string)}"}
+                return {"success": False, "content": "", "error": f"old_string not found in file: {repr(old_string)}", "metadata": None}
             if count > 1:
-                return {"success": False, "content": "", "error": f"old_string found {count} times in file. Must be unique."}
+                return {"success": False, "content": "", "error": f"old_string found {count} times in file. Must be unique.", "metadata": None}
 
             new_content = content.replace(old_string, new_string, 1)
             with open(resolved, "w", encoding="utf-8") as f:
                 f.write(new_content)
 
-            return {"success": True, "content": f"File edited: {path}", "error": None}
+            return {"success": True, "content": f"File edited: {path}", "error": None, "metadata": None}
         except ValueError as e:
-            return {"success": False, "content": "", "error": str(e)}
+            return {"success": False, "content": "", "error": str(e), "metadata": None}
         except Exception as e:
-            return {"success": False, "content": "", "error": f"Error editing file: {e}"}
+            return {"success": False, "content": "", "error": f"Error editing file: {e}", "metadata": None}
 
     return [read_file, write_file, edit_file]
