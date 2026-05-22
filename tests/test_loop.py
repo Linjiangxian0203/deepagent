@@ -159,14 +159,23 @@ class AlwaysDeny(ConfirmationHandler):
 
 @pytest.mark.asyncio
 async def test_confirmation_handler_approved_executes():
-    """Approved confirmation executes tool normally."""
+    """Approved confirmation for a shell-level tool executes normally."""
     cfg = make_config()
     fake_llm = FakeLLMClient([
         ToolCallEvent(tool_calls=[
-            ToolCall(id="call_1", name="echo", arguments={"message": "test"})
+            ToolCall(id="call_1", name="run_cmd", arguments={"command": "ls"})
         ]),
     ])
-    reg = make_registry()
+    reg = ToolRegistry()
+
+    @tool(
+        registry=reg,
+        description="Run a shell command",
+        safety_level=SafetyLevel.SHELL,
+    )
+    async def run_cmd(command: str) -> dict:
+        return {"success": True, "content": f"Ran: {command}"}
+
     loop = AgentLoop(cfg, fake_llm, reg, confirm_handler=AlwaysConfirm())
 
     events = []
@@ -179,14 +188,23 @@ async def test_confirmation_handler_approved_executes():
 
 @pytest.mark.asyncio
 async def test_confirmation_handler_denied_skips():
-    """Denied confirmation skips execution, returns denied result."""
+    """Denied confirmation skips execution, returns denied result. Only shell-level tools trigger confirmation."""
     cfg = make_config()
     fake_llm = FakeLLMClient([
         ToolCallEvent(tool_calls=[
-            ToolCall(id="call_1", name="echo", arguments={"message": "test"})
+            ToolCall(id="call_1", name="run_cmd", arguments={"command": "rm -rf /"})
         ]),
     ])
-    reg = make_registry()
+    reg = ToolRegistry()
+
+    @tool(
+        registry=reg,
+        description="Run a shell command",
+        safety_level=SafetyLevel.SHELL,
+    )
+    async def run_cmd(command: str) -> dict:
+        return {"success": True, "content": f"Ran: {command}"}
+
     loop = AgentLoop(cfg, fake_llm, reg, confirm_handler=AlwaysDeny())
 
     events = []
@@ -197,3 +215,53 @@ async def test_confirmation_handler_denied_skips():
     assert len(result_events) == 1
     assert result_events[0].result.success is False
     assert "denied" in result_events[0].result.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_nonexistent_tool_with_confirmation_handler():
+    """Even with a confirm handler, nonexistent tools should error immediately (no confirm prompt)."""
+    cfg = make_config()
+    fake_llm = FakeLLMClient([
+        ToolCallEvent(tool_calls=[
+            ToolCall(id="call_1", name="nonexistent", arguments={})
+        ]),
+    ])
+    reg = make_registry()
+    # Use AlwaysConfirm -- but confirm should NEVER be called for nonexistent tool
+    loop = AgentLoop(cfg, fake_llm, reg, confirm_handler=AlwaysConfirm())
+
+    events = []
+    async for event in loop.run("test"):
+        events.append(event)
+
+    result_events = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert len(result_events) == 1
+    assert result_events[0].result.success is False
+    assert "not found" in result_events[0].result.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_exception():
+    """Tool that raises an exception should return error result, not crash the loop."""
+    cfg = make_config()
+    reg = ToolRegistry()
+
+    @tool(registry=reg, description="Always crashes", safety_level=SafetyLevel.READONLY)
+    async def crash() -> dict:
+        raise RuntimeError("boom")
+
+    fake_llm = FakeLLMClient([
+        ToolCallEvent(tool_calls=[
+            ToolCall(id="call_1", name="crash", arguments={})
+        ]),
+    ])
+    loop = AgentLoop(cfg, fake_llm, reg)
+
+    events = []
+    async for event in loop.run("test"):
+        events.append(event)
+
+    result_events = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert len(result_events) == 1
+    assert result_events[0].result.success is False
+    assert "boom" in result_events[0].result.error

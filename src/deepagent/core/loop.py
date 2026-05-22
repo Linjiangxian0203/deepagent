@@ -14,6 +14,7 @@ from deepagent.core.events import (
     AgentEvent,
 )
 from deepagent.tools.registry import ToolRegistry
+from deepagent.tools.protocol import SafetyLevel
 
 
 class ConfirmationHandler(Protocol):
@@ -79,8 +80,29 @@ class AgentLoop:
         for tc in pending_tool_calls:
             tool = self._tools.get(tc.name)
 
-            # Confirmation check
-            if self._confirm is not None:
+            # Tool existence check must come first
+            if tool is None:
+                result = ToolResult(
+                    success=False,
+                    content="",
+                    error=f"Tool '{tc.name}' not found",
+                )
+                result_event = ToolResultEvent(tool_call=tc, result=result)
+                yield result_event
+                tool_results.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": f"Error: {result.error}",
+                    }
+                )
+                continue
+
+            # Confirmation check — only for shell-level tools
+            if (
+                tool.tool_safety_level == SafetyLevel.SHELL
+                and self._confirm is not None
+            ):
                 approved = await self._confirm.confirm(tc.name, tc.arguments)
                 if not approved:
                     denied_result = ToolResult(
@@ -104,26 +126,19 @@ class AgentLoop:
             # Tool execution
             yield ToolCallStartEvent(tool_call=tc)
 
-            if tool is None:
-                result = ToolResult(
-                    success=False,
-                    content="",
-                    error=f"Tool '{tc.name}' not found",
-                )
-            else:
-                try:
-                    raw = await tool(**tc.arguments)
-                    if isinstance(raw, dict):
-                        result = ToolResult(
-                            success=raw.get("success", False),
-                            content=raw.get("content", ""),
-                            error=raw.get("error"),
-                            metadata=raw.get("metadata"),
-                        )
-                    else:
-                        result = ToolResult(success=True, content=str(raw))
-                except Exception as e:
-                    result = ToolResult(success=False, content="", error=str(e))
+            try:
+                raw = await tool(**tc.arguments)
+                if isinstance(raw, dict):
+                    result = ToolResult(
+                        success=raw.get("success", False),
+                        content=raw.get("content", ""),
+                        error=raw.get("error"),
+                        metadata=raw.get("metadata"),
+                    )
+                else:
+                    result = ToolResult(success=True, content=str(raw))
+            except Exception as e:
+                result = ToolResult(success=False, content="", error=str(e))
 
             result_event = ToolResultEvent(tool_call=tc, result=result)
             yield result_event
