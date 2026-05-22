@@ -1,0 +1,21 @@
+[project]
+name = "deepagent"
+version = "0.1.0"
+description = "CLI coding agent powered by DeepSeek API"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.0.0",
+    "rich>=13.0.0",
+    "prompt-toolkit>=3.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+deepagent = "deepagent.main:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
