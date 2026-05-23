@@ -19,3 +19,6 @@ venv/
 
 # Env
 .env
+
+# Design docs (personal notes, not part of the project)
+docs/
