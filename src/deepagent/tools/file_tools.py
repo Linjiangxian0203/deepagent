@@ -72,7 +72,16 @@ def create_file_tools(registry: ToolRegistry, safe_root: str | None = None) -> l
             if count == 0:
                 return {"success": False, "content": "", "error": f"old_string not found in file: {repr(old_string)}", "metadata": None}
             if count > 1:
-                return {"success": False, "content": "", "error": f"old_string found {count} times in file. Must be unique.", "metadata": None}
+                # Show context around each match to help craft a unique old_string
+                contexts = []
+                idx = 0
+                for i in range(count):
+                    idx = content.find(old_string, idx)
+                    line_num = content[:idx].count('\n') + 1
+                    contexts.append(f"  Line {line_num}: ...{repr(content[max(0,idx-20):idx+len(old_string)+20])}...")
+                    idx += len(old_string)
+                ctx_block = "\n".join(contexts[:10])
+                return {"success": False, "content": "", "error": f"old_string found {count} times. Must be unique. Matches at:\n{ctx_block}", "metadata": None}
 
             new_content = content.replace(old_string, new_string, 1)
             with open(resolved, "w", encoding="utf-8") as f:

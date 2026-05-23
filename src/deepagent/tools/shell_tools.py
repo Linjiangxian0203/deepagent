@@ -1,8 +1,18 @@
 # src/deepagent/tools/shell_tools.py
 import asyncio
 import os
+
 from deepagent.tools.protocol import SafetyLevel
 from deepagent.tools.registry import ToolRegistry, tool
+
+
+def _shell_executable() -> str | None:
+    """Return the shell executable to use, or None for the system default.
+
+    On Windows the native shell (cmd.exe via create_subprocess_shell) is used
+    so that commands and paths match the Windows environment the user sees.
+    """
+    return None
 
 
 def create_shell_tools(registry: ToolRegistry) -> list:
@@ -17,12 +27,22 @@ def create_shell_tools(registry: ToolRegistry) -> list:
         proc = None
         try:
             working_dir = cwd if cwd else os.getcwd()
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=working_dir,
-            )
+            shell_exe = _shell_executable()
+
+            if shell_exe:
+                proc = await asyncio.create_subprocess_exec(
+                    shell_exe, "-c", command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=working_dir,
+                )
+            else:
+                proc = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=working_dir,
+                )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
             )

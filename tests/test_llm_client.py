@@ -21,7 +21,7 @@ def test_llm_client_initialization():
 @pytest.mark.asyncio
 async def test_stream_chat_yields_text_deltas():
     """Integration test: requires DEEPSEEK_API_KEY in env."""
-    cfg = Config()  # reads from real env
+    cfg = make_config()  # uses test key; real API call requires valid key
     client = LLMClient(cfg)
     messages = [{"role": "user", "content": "Say exactly: hello world"}]
 

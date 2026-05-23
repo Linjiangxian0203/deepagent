@@ -12,6 +12,14 @@ class Config:
                 "Set it in your environment or a .env file."
             )
         self.base_url = env.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-        self.model = env.get("DEEPSEEK_MODEL", "deepseek-chat")
+        self.model = env.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
+        # Thinking mode (DeepSeek V4)
+        self.thinking_enabled = env.get("DEEPSEEK_THINKING_ENABLED", "1") not in ("0", "false", "False")
+        self.reasoning_effort = env.get("DEEPSEEK_REASONING_EFFORT", "max")  # high | max
+        # Sampling
+        self.max_tokens = int(env.get("DEEPSEEK_MAX_TOKENS", "8192"))
+        self.temperature = float(env.get("DEEPSEEK_TEMPERATURE", "1.0"))
+        self.top_p = float(env.get("DEEPSEEK_TOP_P", "1.0"))
+        # Loop control
         self.max_iterations = int(env.get("DEEPSEEK_MAX_ITERATIONS", "50"))
         self.max_tools_per_turn = int(env.get("DEEPSEEK_MAX_TOOLS_PER_TURN", "10"))

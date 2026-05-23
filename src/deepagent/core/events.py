@@ -25,6 +25,7 @@ class ToolCall:
 class ToolCallEvent:
     """One or more tool calls emitted in a single LLM response."""
     tool_calls: list[ToolCall]
+    reasoning_content: str | None = None  # thinking that led to these tool calls
 
 
 @dataclass
@@ -67,6 +68,17 @@ class DoneEvent:
     pass
 
 
+@dataclass
+class UsageEvent:
+    """Token usage from the last LLM call."""
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    reasoning_tokens: int = 0
+    cache_hit_tokens: int = 0
+    cache_miss_tokens: int = 0
+
+
 # Union type for all events
 AgentEvent = (
     TextDelta
@@ -77,4 +89,5 @@ AgentEvent = (
     | ToolLimitEvent
     | InterruptedEvent
     | DoneEvent
+    | UsageEvent
 )
