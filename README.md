@@ -1,18 +1,20 @@
 # Deepagent
 
+English | [中文](README.zh-CN.md)
+
 A CLI coding agent powered by the DeepSeek API. Runs in your terminal, reads your codebase, edits files, runs shell commands, and delegates subtasks to sub-agents -- all within a multi-turn ReAct loop with streaming output and thinking mode.
 
 ## Features
 
 - **Multi-turn ReAct loop** -- the agent iterates: thinks, calls tools, observes results, and continues until the task is complete or a configurable iteration limit is reached.
-- **11 built-in tools** -- `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `run_shell`, `git_diff`, `git_log`, `git_status`, `web_search`, `web_fetch`, and `delegate` (sub-agent spawning with concurrency control).
+- **12 built-in tools** -- `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `run_shell`, `git_diff`, `git_log`, `git_status`, `web_search`, `web_fetch`, and `delegate` (sub-agent spawning with concurrency control).
 - **Streaming output** -- LLM text streams to the terminal in real time. DeepSeek thinking mode content is displayed separately with character counts.
 - **Token budget management** -- tracks cumulative token usage against a 980K effective limit (of the 1M context window) and can compress older messages into a summary when approaching the limit.
 - **Long-term memory** -- filesystem-based persistent memory using Markdown files with YAML frontmatter, compatible with the Claude Code memory format (`~/.claude/projects/<slug>/memory/`).
 - **Safety prompts** -- write-level and shell-level tools require interactive `y/N` confirmation before execution. File operations can be sandboxed to a configurable safe root directory.
 - **Sub-agent delegation** -- the `delegate` tool spawns parallel sub-agents for independent tasks, with concurrency limited to 5 by default.
 - **CLAUDE.md awareness** -- automatically loads `~/.claude/CLAUDE.md` and project-level `CLAUDE.md` files and injects them into the system prompt.
-- **Cross-platform** -- works on Windows (auto-detects Git Bash or WSL), macOS, and Linux.
+- **Windows native** -- runs natively on Windows with cmd.exe. Uses Windows commands (dir, findstr, type) and backslash paths.
 
 ## Quick Start
 
@@ -24,7 +26,7 @@ A CLI coding agent powered by the DeepSeek API. Runs in your terminal, reads you
 ### Install
 
 ```bash
-git clone <repo-url> deepagent
+git clone https://github.com/Linjiangxian0203/deepagent.git
 cd deepagent
 pip install -e .
 ```
@@ -32,6 +34,11 @@ pip install -e .
 ### Run
 
 ```bash
+# Windows (cmd / PowerShell)
+set DEEPSEEK_API_KEY=sk-your-key-here
+deepagent
+
+# Linux / macOS
 export DEEPSEEK_API_KEY="sk-your-key-here"
 deepagent
 ```
@@ -114,10 +121,13 @@ deepagent/
 ### Setup
 
 ```bash
-git clone <repo-url> deepagent
+git clone https://github.com/Linjiangxian0203/deepagent.git
 cd deepagent
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+# Windows
+.venv\Scripts\activate
+# Linux / macOS
+source .venv/bin/activate
 pip install -e .
 ```
 
