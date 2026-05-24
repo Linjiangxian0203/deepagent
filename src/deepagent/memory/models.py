@@ -12,6 +12,8 @@ class MemoryEntry:
     memory_type: str  # "user" | "feedback" | "project" | "reference"
     content: str  # body (everything after the frontmatter)
     file_path: str = ""  # path to the .md file on disk
+    hit_count: int = 0
+    confidence: float = 1.0
 
     @staticmethod
     def parse_frontmatter(raw: str, file_path: str = "") -> "MemoryEntry | None":
@@ -53,6 +55,16 @@ class MemoryEntry:
         if m:
             memory_type = m.group(1)
 
+        hit_count = 0
+        m = re.search(r'hit_count:\s*(\d+)', frontmatter_str)
+        if m:
+            hit_count = int(m.group(1))
+
+        conf = 1.0
+        m = re.search(r'confidence:\s*([\d.]+)', frontmatter_str)
+        if m:
+            conf = float(m.group(1))
+
         name = fields.get("name", "")
         if not name:
             return None
@@ -63,6 +75,8 @@ class MemoryEntry:
             memory_type=memory_type,
             content=content,
             file_path=file_path,
+            hit_count=hit_count,
+            confidence=conf,
         )
 
     def to_frontmatter(self) -> str:
@@ -73,6 +87,8 @@ class MemoryEntry:
             f"description: {self.description}\n"
             f"metadata:\n"
             f"  type: {self.memory_type}\n"
+            f"  hit_count: {self.hit_count}\n"
+            f"  confidence: {self.confidence}\n"
             f"---\n"
             f"\n"
             f"{self.content}\n"
