@@ -56,6 +56,7 @@ class AgentLoop:
         memory_store=None,  # MemoryStore, duck typing
         hook_system: HookSystem | None = None,
         background_mgr=None,  # BackgroundManager, duck typing
+        message_bus=None,  # MessageBus, duck typing
     ):
         self.config = config
         self._llm = llm_client
@@ -65,6 +66,7 @@ class AgentLoop:
         self._memory = memory_store
         self._hooks = hook_system
         self._bg_mgr = background_mgr
+        self._bus = message_bus
         self._interrupted = False
         self._rounds_since_todo = 0
 
@@ -87,6 +89,15 @@ class AgentLoop:
                 self._ctx.add_user_message(
                     f"[Background task completed]\n{notif['notification']}"
                 )
+
+        # Inject teammate inbox messages
+        if self._bus is not None:
+            inbox_msgs = self._bus.read_inbox("lead")
+            if inbox_msgs:
+                lines = [f"  From {m['from']} [{m['type']}]: {m['content'][:300]}"
+                         for m in inbox_msgs]
+                inbox_text = "\n".join(lines)
+                self._ctx.add_user_message(f"[Inbox — {len(inbox_msgs)} message(s)]\n{inbox_text}")
 
         # L3: refresh long-term memory and inject into system prompt
         if self._memory is not None and self._memory.needs_refresh():

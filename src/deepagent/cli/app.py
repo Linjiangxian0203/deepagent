@@ -296,6 +296,13 @@ async def run_cli(config: Config) -> None:
     create_todo_write_tool(tool_registry)
     create_task_system_tools(tool_registry, task_mgr)
 
+    from deepagent.core.message_bus import MessageBus
+    from deepagent.tools.team_tools import create_team_tools
+
+    mailboxes_dir = Path(project_root) / ".mailboxes"
+    message_bus = MessageBus(str(mailboxes_dir))
+    create_team_tools(tool_registry, message_bus, llm_client, tool_registry, cwd=project_root)
+
     session = PromptSession()
     confirm_handler = TerminalConfirmationHandler(session)
 
@@ -386,6 +393,7 @@ async def run_cli(config: Config) -> None:
             context=ctx, confirm_handler=confirm_handler,
             memory_store=memory_store,
             background_mgr=background_mgr,
+            message_bus=message_bus,
         )
 
         in_thinking = False
