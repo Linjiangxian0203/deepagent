@@ -185,3 +185,18 @@ def test_task_status_class():
     assert TaskStatus.validate("pending") == "pending"
     with pytest.raises(ValueError):
         TaskStatus.validate("unknown")
+
+
+def test_task_from_dict_rejects_invalid_status():
+    """C1 regression: corrupted files with invalid status must raise on load."""
+    from deepagent.core.tasks import Task
+    with pytest.raises(ValueError, match="Invalid status"):
+        Task.from_dict({
+            "id": "task_1234_5678",
+            "subject": "Corrupted",
+            "description": "",
+            "status": "unknown",
+            "owner": None,
+            "blocked_by": [],
+            "metadata": {},
+        })

@@ -303,19 +303,40 @@ class AgentLoop:
                             self._ctx.add_tool_result(tc.id, denied_result)
                             continue
 
-                    yield ToolCallStartEvent(tool_call=tc)
-                    result = await self._safe_execute(tc, tool)
-                    yield ToolResultEvent(tool_call=tc, result=result)
-                    self._ctx.add_tool_result(tc.id, result)
+                    # ── Background dispatch: slow ops run in asyncio task ──
+                    from deepagent.core.background import should_run_background
 
-                    # ── PostToolUse hooks (fire-and-forget) ──
-                    if self._hooks is not None:
-                        await self._hooks.trigger(
-                            "PostToolUse",
-                            tool_name=tc.name,
-                            arguments=tc.arguments,
-                            result=result,
+                    if self._bg_mgr is not None and should_run_background(tc.name, tc.arguments):
+                        yield ToolCallStartEvent(tool_call=tc)
+                        bg_id = self._bg_mgr.start(
+                            tc.name,
+                            tc.arguments,
+                            self._do_execute(tc, tool),
                         )
+                        placeholder = ToolResult(
+                            success=True,
+                            content=(
+                                f"[Background task {bg_id} started] "
+                                f"Command: {tc.arguments.get('command', tc.name)}. "
+                                f"Result will be available when complete."
+                            ),
+                        )
+                        yield ToolResultEvent(tool_call=tc, result=placeholder)
+                        self._ctx.add_tool_result(tc.id, placeholder)
+                    else:
+                        yield ToolCallStartEvent(tool_call=tc)
+                        result = await self._safe_execute(tc, tool)
+                        yield ToolResultEvent(tool_call=tc, result=result)
+                        self._ctx.add_tool_result(tc.id, result)
+
+                        # ── PostToolUse hooks (fire-and-forget) ──
+                        if self._hooks is not None:
+                            await self._hooks.trigger(
+                                "PostToolUse",
+                                tool_name=tc.name,
+                                arguments=tc.arguments,
+                                result=result,
+                            )
 
             # Track todo_write calls: reset nag counter if used
             for tc in pending_tool_calls:

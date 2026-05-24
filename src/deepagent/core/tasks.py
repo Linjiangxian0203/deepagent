@@ -65,8 +65,11 @@ class Task:
             },
         )
 
+    def __post_init__(self):
+        TaskStatus.validate(self.status)
+
     def __setattr__(self, name, value):
-        if name == "status" and hasattr(self, "status"):
+        if name == "status":
             TaskStatus.validate(value)
         super().__setattr__(name, value)
 
