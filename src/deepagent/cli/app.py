@@ -301,7 +301,17 @@ async def run_cli(config: Config) -> None:
 
     mailboxes_dir = Path(project_root) / ".mailboxes"
     message_bus = MessageBus(str(mailboxes_dir))
-    create_team_tools(tool_registry, message_bus, llm_client, tool_registry, cwd=project_root)
+
+    # Register submit_plan for teammate use (intercepted by _execute_teammate_tool)
+    from deepagent.tools.registry import tool as register_tool
+    @register_tool(tool_registry, name="submit_plan",
+                   description="Submit a plan to Lead for approval via protocol.",
+                   safety_level=SafetyLevel.WRITE)
+    async def submit_plan(plan: str) -> dict:
+        return {"success": True, "content": "Plan submitted."}
+
+    create_team_tools(tool_registry, message_bus, llm_client, tool_registry,
+                      cwd=project_root, task_mgr=task_mgr)
 
     session = PromptSession()
     confirm_handler = TerminalConfirmationHandler(session)
