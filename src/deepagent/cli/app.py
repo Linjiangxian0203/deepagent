@@ -288,6 +288,14 @@ async def run_cli(config: Config) -> None:
     from deepagent.tools.memory_tools import create_memory_tools
     create_memory_tools(tool_registry, memory_store)
 
+    from deepagent.core.tasks import TaskManager
+    from deepagent.tools.task_tools import create_todo_write_tool, create_task_system_tools
+
+    tasks_dir = Path(project_root) / ".tasks"
+    task_mgr = TaskManager(str(tasks_dir))
+    create_todo_write_tool(tool_registry)
+    create_task_system_tools(tool_registry, task_mgr)
+
     session = PromptSession()
     confirm_handler = TerminalConfirmationHandler(session)
 
@@ -337,6 +345,10 @@ async def run_cli(config: Config) -> None:
     # the agent to forget all prior conversation.
     ctx = ContextManager(system_prompt=system_prompt)
 
+    from deepagent.core.background import BackgroundManager
+
+    background_mgr = BackgroundManager()
+
     # Transcript saving on compaction events and session exit
     transcript_dir = Path.home() / ".deepagent" / "transcripts"
     compactor = Compactor(transcript_dir=transcript_dir)
@@ -373,6 +385,7 @@ async def run_cli(config: Config) -> None:
             config, llm_client, tool_registry,
             context=ctx, confirm_handler=confirm_handler,
             memory_store=memory_store,
+            background_mgr=background_mgr,
         )
 
         in_thinking = False
