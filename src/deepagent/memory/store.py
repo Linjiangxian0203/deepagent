@@ -130,3 +130,58 @@ class MemoryStore:
         self._cache.clear()
         self._loaded = False
         self.load_index()
+
+    # ── hit tracking ───────────────────────────────────────────────
+
+    def increment_hits(self, name: str) -> None:
+        """Increment the hit_count on a memory entry."""
+        entry = self.read_entry(name)
+        if entry is not None:
+            entry.hit_count += 1
+            self.write_entry(entry)
+
+    # ── consolidation ──────────────────────────────────────────────
+
+    CONSOLIDATION_THRESHOLD = 10
+
+    @property
+    def memory_count(self) -> int:
+        """Count all .md files (excluding MEMORY.md)."""
+        if not self._root.exists():
+            return 0
+        return len([f for f in self._root.glob("*.md") if f.name != "MEMORY.md"])
+
+    def needs_consolidation(self) -> bool:
+        return self.memory_count >= self.CONSOLIDATION_THRESHOLD
+
+    def extract_memories(self, messages: list) -> None:
+        """Placeholder for LLM-driven memory extraction.
+
+        Analyzes conversation messages for new facts/preferences/constraints.
+        Real implementation calls LLM to determine if new memories should be
+        created. For now, this is a no-op — the agent uses create_memory tool
+        explicitly.
+        """
+        pass
+
+    # ── conflict detection ─────────────────────────────────────────
+
+    def detect_conflicts(self) -> list[tuple[str, str]]:
+        """Detect potentially conflicting memories by comparing descriptions.
+
+        Returns list of (name_a, name_b) pairs that may conflict.
+        Uses simple keyword overlap for now.
+        """
+        entries = self.get_all_entries()
+        if len(entries) < 2:
+            return []
+
+        conflicts = []
+        for i in range(len(entries)):
+            a_words = set(entries[i].description.lower().split())
+            for j in range(i + 1, len(entries)):
+                b_words = set(entries[j].description.lower().split())
+                overlap = len(a_words & b_words) / max(len(a_words | b_words), 1)
+                if overlap > 0.5 and entries[i].memory_type == entries[j].memory_type:
+                    conflicts.append((entries[i].name, entries[j].name))
+        return conflicts
