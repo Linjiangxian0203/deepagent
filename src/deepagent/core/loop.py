@@ -55,6 +55,7 @@ class AgentLoop:
         confirm_handler: ConfirmationHandler | None = None,
         memory_store=None,  # MemoryStore, duck typing
         hook_system: HookSystem | None = None,
+        background_mgr=None,  # BackgroundManager, duck typing
     ):
         self.config = config
         self._llm = llm_client
@@ -63,7 +64,9 @@ class AgentLoop:
         self._confirm = confirm_handler
         self._memory = memory_store
         self._hooks = hook_system
+        self._bg_mgr = background_mgr
         self._interrupted = False
+        self._rounds_since_todo = 0
 
     def interrupt(self) -> None:
         self._interrupted = True
@@ -75,6 +78,15 @@ class AgentLoop:
         the model responds without tool calls (final answer).
         """
         self._interrupted = False
+        self._rounds_since_todo = 0
+
+        # Inject completed background task results from previous turns
+        if self._bg_mgr is not None:
+            bg_notifications = self._bg_mgr.collect_ready()
+            for notif in bg_notifications:
+                self._ctx.add_user_message(
+                    f"[Background task completed]\n{notif['notification']}"
+                )
 
         # L3: refresh long-term memory and inject into system prompt
         if self._memory is not None and self._memory.needs_refresh():
@@ -94,6 +106,14 @@ class AgentLoop:
             if self._interrupted:
                 yield InterruptedEvent()
                 break
+
+            # Nag reminder: inject after 3 rounds without todo_write
+            if self._rounds_since_todo >= 3:
+                self._ctx.add_user_message(
+                    "<reminder>Update your todo list. Use todo_write to plan and "
+                    "track your progress.</reminder>"
+                )
+                self._rounds_since_todo = 0
 
             # ── Phase 1: Stream LLM, collect only (no side effects) ──
             response_parts: list[str] = []
@@ -296,6 +316,14 @@ class AgentLoop:
                             arguments=tc.arguments,
                             result=result,
                         )
+
+            # Track todo_write calls: reset nag counter if used
+            for tc in pending_tool_calls:
+                if tc.name == "todo_write":
+                    self._rounds_since_todo = 0
+                    break
+            else:
+                self._rounds_since_todo += 1
 
             # Loop continues → LLM sees tool results, decides next action
 
