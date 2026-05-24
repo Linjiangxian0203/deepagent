@@ -5,10 +5,11 @@ The ContextManager owns the message list across multi-turn ReAct iterations,
 truncates long tool results, and tracks cumulative token usage from UsageEvents.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 
 from deepagent.core.events import ToolResult
+from deepagent.core.compaction import Compactor, CompactionResult, MAX_MESSAGES_L2
 
 
 @dataclass
@@ -32,10 +33,16 @@ class ContextManager:
     - Inject system prompt at the front of the message list
     """
 
-    def __init__(self, system_prompt: str = "", token_budget: TokenBudget | None = None):
+    def __init__(
+        self,
+        system_prompt: str = "",
+        token_budget: TokenBudget | None = None,
+        compactor: Compactor | None = None,
+    ):
         self._messages: list[dict] = []
         self._system_prompt = system_prompt
         self._budget = token_budget or TokenBudget()
+        self._compactor = compactor
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
 
@@ -117,6 +124,35 @@ class ContextManager:
     @property
     def message_count(self) -> int:
         return len(self._messages)
+
+    # ── L2/L3 compaction (Phase 1) ─────────────────────────────────
+
+    def compact_l2_l3(self) -> bool:
+        """Apply L2 and L3 compaction in-place on the message list.
+
+        L2: if message count > 50, keep first 3 + last 47, placeholder middle.
+        L3: if > 3 tool results, keep last 3 verbatim, replace older with placeholder.
+
+        Returns True if any compaction was applied. Does NOT require LLM summarizer.
+        """
+        if self._compactor is None:
+            return False
+
+        applied = False
+
+        # L2: message count threshold
+        if len(self._messages) > MAX_MESSAGES_L2:
+            result = Compactor._compact_l2(CompactionResult(messages=self._messages))
+            self._messages = result.messages
+            applied = True
+
+        # L3: old tool result summarization
+        result = Compactor._compact_l3(CompactionResult(messages=self._messages))
+        if "L3" in result.layers_applied:
+            self._messages = result.messages
+            applied = True
+
+        return applied
 
     # ── compression ────────────────────────────────────────────────
 

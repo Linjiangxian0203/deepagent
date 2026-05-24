@@ -46,18 +46,8 @@ class MemoryEntry:
                     continue
                 fields[key] = value.strip()
 
+        # Extract metadata.type from YAML frontmatter
         memory_type = "user"
-        # Extract metadata.type if present
-        for line in frontmatter_str.split("\n"):
-            if "type:" in line and ("metadata" in frontmatter_str.split(line)[0] if True else False):
-                # Just look for type: after metadata
-                stripped = line.strip()
-                if stripped.startswith("type:"):
-                    # If it's on its own line with indentation, it's metadata.type
-                    memory_type = stripped.split(":", 1)[1].strip()
-                    break
-
-        # More robust: find metadata block
         import re
         m = re.search(r'metadata:\s*\n\s*type:\s*(\w+)', frontmatter_str)
         if m:

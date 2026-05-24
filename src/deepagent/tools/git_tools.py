@@ -1,5 +1,5 @@
 # src/deepagent/tools/git_tools.py
-import subprocess
+import asyncio
 from deepagent.tools.protocol import SafetyLevel
 from deepagent.tools.registry import ToolRegistry, tool
 
@@ -7,22 +7,24 @@ from deepagent.tools.registry import ToolRegistry, tool
 def create_git_tools(registry: ToolRegistry) -> list:
     """Create and register git tools (diff, log, status)."""
 
-    def _run_git(args: list[str]) -> dict:
-        """Run a git command and return a result dict. Handles git not found / not a repo."""
+    async def _run_git(args: list[str]) -> dict:
+        """Run a git command asynchronously. Handles git not found / not a repo."""
         try:
-            result = subprocess.run(
-                ["git"] + args,
-                capture_output=True,
-                text=True,
+            proc = await asyncio.create_subprocess_exec(
+                "git", *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if result.returncode != 0:
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                err_text = stderr.decode("utf-8", errors="replace").strip()
                 return {
                     "success": False,
                     "content": "",
-                    "error": result.stderr.strip() or f"git exited with code {result.returncode}",
+                    "error": err_text or f"git exited with code {proc.returncode}",
                     "metadata": None,
                 }
-            output = result.stdout.strip()
+            output = stdout.decode("utf-8", errors="replace").strip()
             return {
                 "success": True,
                 "content": output if output else "(no output)",

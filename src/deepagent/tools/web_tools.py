@@ -1,8 +1,8 @@
 # src/deepagent/tools/web_tools.py
 import re
-import urllib.request
 import urllib.parse
-import urllib.error
+
+import aiohttp
 
 from deepagent.tools.protocol import SafetyLevel
 from deepagent.tools.registry import ToolRegistry, tool
@@ -14,13 +14,17 @@ _USER_AGENT = (
 )
 
 
-def _fetch_html(url: str, timeout: int = 15) -> str | None:
-    """Fetch a URL and return the decoded HTML text, or None on failure."""
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+async def _fetch_html(url: str, timeout: int = 15) -> str | None:
+    """Fetch a URL asynchronously and return the decoded HTML text, or None on failure."""
+    headers = {"User-Agent": _USER_AGENT}
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            charset = resp.headers.get_content_charset() or "utf-8"
-            return resp.read().decode(charset, errors="replace")
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                if resp.status != 200:
+                    return None
+                raw = await resp.read()
+                charset = resp.charset or "utf-8"
+                return raw.decode(charset, errors="replace")
     except Exception:
         return None
 
@@ -37,7 +41,7 @@ def create_web_tools(registry: ToolRegistry) -> list:
         try:
             encoded = urllib.parse.quote(query)
             url = f"https://html.duckduckgo.com/html/?q={encoded}"
-            html = _fetch_html(url, timeout=15)
+            html = await _fetch_html(url, timeout=15)
             if html is None:
                 return {
                     "success": False,
@@ -93,11 +97,11 @@ def create_web_tools(registry: ToolRegistry) -> list:
                     "total_available": len(links),
                 },
             }
-        except urllib.error.URLError as e:
+        except aiohttp.ClientError as e:
             return {
                 "success": False,
                 "content": "",
-                "error": f"Network error during web search: {e.reason}",
+                "error": f"Network error during web search: {e}",
                 "metadata": None,
             }
         except Exception as e:
@@ -115,7 +119,7 @@ def create_web_tools(registry: ToolRegistry) -> list:
     )
     async def web_fetch(url: str, max_chars: int = 10000) -> dict:
         try:
-            html = _fetch_html(url, timeout=15)
+            html = await _fetch_html(url, timeout=15)
             if html is None:
                 return {
                     "success": False,
@@ -150,11 +154,11 @@ def create_web_tools(registry: ToolRegistry) -> list:
                     "truncated": original_len > max_chars,
                 },
             }
-        except urllib.error.URLError as e:
+        except aiohttp.ClientError as e:
             return {
                 "success": False,
                 "content": "",
-                "error": f"Network error fetching URL: {e.reason}",
+                "error": f"Network error fetching URL: {e}",
                 "metadata": None,
             }
         except ValueError as e:

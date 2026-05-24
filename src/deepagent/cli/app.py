@@ -16,6 +16,7 @@ from deepagent.core.context import ContextManager
 from deepagent.core.llm_client import LLMClient
 from deepagent.core.loop import AgentLoop, ConfirmationHandler
 from deepagent.core.sub_agent import SubAgentRunner
+from deepagent.core.compaction import Compactor
 from deepagent.core.events import (
     TextDelta, ThinkingDelta, ToolCallEvent,
     ToolCallStartEvent, ToolResultEvent, ToolLimitEvent,
@@ -268,6 +269,16 @@ async def run_cli(config: Config) -> None:
     sub_agent_runner = SubAgentRunner(config, llm_client, tool_registry)
     create_delegate_tools(tool_registry, sub_agent_runner)
 
+    # Skill loading
+    from deepagent.core.skills import SkillRegistry
+    from deepagent.tools.skill_tools import create_skill_tools
+
+    skill_registry = SkillRegistry()
+    skills_dir = Path(project_root) / "skills"
+    if skills_dir.exists():
+        skill_registry.scan(str(skills_dir))
+    create_skill_tools(tool_registry, skill_registry)
+
     # Long-term memory
     cwd = os.getcwd()
     memory_root = _find_memory_root(cwd)
@@ -279,6 +290,23 @@ async def run_cli(config: Config) -> None:
 
     # Build system prompt with CLAUDE.md + memory
     system_prompt = _build_system_prompt(memory_context)
+
+    from deepagent.core.system_prompt import SystemPrompt, PromptSection, PRIORITY_SKILLS_CATALOG
+
+    sp = SystemPrompt()
+    sp.register(PromptSection(
+        name="base",
+        content=system_prompt,
+        priority=100,
+    ))
+    catalog = skill_registry.get_catalog()
+    if catalog:
+        sp.register(PromptSection(
+            name="skills-catalog",
+            content=catalog,
+            priority=PRIORITY_SKILLS_CATALOG,
+        ))
+    system_prompt = sp.assemble()
 
     # ── Startup banner ──
     _render_banner(console, config, cwd, tool_registry, memory_store)
@@ -300,6 +328,15 @@ async def run_cli(config: Config) -> None:
     session_turns = 0
     session_tool_calls = 0
     session_start = time.time()
+
+    # Session-level context: persists across all user turns.
+    # Previously a fresh ContextManager was created per turn, causing
+    # the agent to forget all prior conversation.
+    ctx = ContextManager(system_prompt=system_prompt)
+
+    # Transcript saving on compaction events and session exit
+    transcript_dir = Path.home() / ".deepagent" / "transcripts"
+    compactor = Compactor(transcript_dir=transcript_dir)
 
     while True:
         try:
@@ -328,8 +365,7 @@ async def run_cli(config: Config) -> None:
             console.print()
             continue
 
-        # Fresh context per user message, with system prompt + memory
-        ctx = ContextManager(system_prompt=system_prompt)
+        # Reuse session-level context across turns
         current_loop = AgentLoop(
             config, llm_client, tool_registry,
             context=ctx, confirm_handler=confirm_handler,
@@ -438,4 +474,11 @@ async def run_cli(config: Config) -> None:
     else:
         duration = f"{elapsed / 3600:.1f}h"
     console.print(f"\n[dim]Session: {session_turns} turns, {session_tool_calls} tool calls, {duration}[/dim]")
+
+    # Save session transcript
+    if ctx.message_count > 0:
+        transcript_path = await compactor.save_session_transcript(ctx.get_messages())
+        if transcript_path:
+            console.print(f"[dim]Transcript saved: {transcript_path}[/dim]")
+
     console.print("[dim]Bye.[/dim]")

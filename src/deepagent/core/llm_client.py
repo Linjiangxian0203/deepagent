@@ -1,7 +1,9 @@
 # src/deepagent/core/llm_client.py
 import asyncio
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
 import json
+import logging
 import random
 
 from openai import AsyncOpenAI
@@ -11,16 +13,49 @@ from deepagent.core.events import (
     TextDelta, ThinkingDelta, ToolCallEvent, ToolCall, UsageEvent,
 )
 
+logger = logging.getLogger(__name__)
+
+# ── Recovery constants ────────────────────────────────────────────
+
+MAX_TOKENS_ESCALATION = [8192, 16384, 32768]  # progressively larger limits
+MAX_CONTINUATION_ATTEMPTS = 2
+FALLBACK_MODEL = "deepseek-v4-flash"
+
+
+@dataclass
+class RecoveryState:
+    """Tracks error recovery state across a session.
+
+    Used by LLMClient and AgentLoop to coordinate recovery actions.
+    """
+
+    max_tokens_escalated: bool = False
+    continuation_attempts: int = 0
+    has_attempted_reactive_compact: bool = False
+    consecutive_529: int = 0
+    fallback_model_active: bool = False
+
 
 class LLMClient:
-    """Wraps DeepSeek API (OpenAI-compatible) with streaming + delta-to-ToolCall assembly."""
+    """Wraps DeepSeek API (OpenAI-compatible) with streaming + delta-to-ToolCall assembly.
 
-    def __init__(self, config: Config):
+    Includes error recovery: max_tokens escalation, 529 fallback model,
+    and exponential backoff with 25% jitter.
+    """
+
+    def __init__(self, config: Config, recovery: RecoveryState | None = None):
         self.config = config
+        self._recovery = recovery or RecoveryState()
         self._client = AsyncOpenAI(
             base_url=config.base_url,
             api_key=config.api_key,
         )
+
+    @property
+    def active_model(self) -> str:
+        if self._recovery.fallback_model_active:
+            return FALLBACK_MODEL
+        return self.config.model
 
     async def stream_chat(
         self,
@@ -32,9 +67,12 @@ class LLMClient:
         Tool calls are fully assembled from streaming deltas before yielding
         a single ToolCallEvent. Text and thinking deltas are yielded in real time.
         Usage is yielded as a UsageEvent after the stream completes.
+
+        Error recovery is applied automatically: 429/5xx retries with jitter,
+        529 overload detection with fallback model, and max_tokens escalation.
         """
         kwargs = {
-            "model": self.config.model,
+            "model": self.active_model,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -57,7 +95,20 @@ class LLMClient:
             except Exception as e:
                 status = getattr(e, "status_code", 0)
                 if attempt < 3 and (status == 429 or status >= 500):
-                    delay = (2 ** attempt) + random.uniform(0, 1)
+                    # 529 overload → track for fallback
+                    if status == 529:
+                        self._recovery.consecutive_529 += 1
+                        if self._recovery.consecutive_529 >= 2:
+                            logger.warning(
+                                "2 consecutive 529 errors — switching to fallback model %s",
+                                FALLBACK_MODEL,
+                            )
+                            self._recovery.fallback_model_active = True
+                            kwargs["model"] = self.active_model
+                    # Exponential backoff with 25% jitter
+                    base = 2 ** attempt
+                    jitter = random.uniform(-0.25, 0.25) * base
+                    delay = base + jitter
                     await asyncio.sleep(delay)
                     continue
                 raise

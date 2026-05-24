@@ -591,3 +591,140 @@ async def test_parallel_readonly_one_fails_others_succeed():
     assert len(successes) == 1
     assert len(failures) == 1
     assert "boom" in failures[0].result.error
+
+
+# ── HookSystem integration (Phase 1) ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_hook_system_blocks_tool_execution():
+    """PreToolUse hook returning HookBlock denies tool execution."""
+    from deepagent.core.hooks import HookSystem, HookBlock
+
+    cfg = make_config()
+    fake_llm = FakeLLMClient([
+        [ToolCallEvent(tool_calls=[
+            ToolCall(id="c1", name="echo", arguments={"message": "hi"})
+        ])],
+        [TextDelta(text="Blocked by hook.")],
+    ])
+    reg = make_registry()
+    hooks = HookSystem()
+
+    async def deny_echo(tool_name, arguments, **kwargs):
+        if tool_name == "echo":
+            return HookBlock("echo is blocked by test hook")
+        return None
+
+    hooks.register("PreToolUse", deny_echo, priority=10, name="test-blocker")
+    loop = AgentLoop(cfg, fake_llm, reg, hook_system=hooks)
+
+    events = []
+    async for event in loop.run("test"):
+        events.append(event)
+
+    result_events = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert len(result_events) == 1
+    assert result_events[0].result.success is False
+    assert "blocked by test hook" in result_events[0].result.content
+
+
+@pytest.mark.asyncio
+async def test_hook_system_allows_when_no_block():
+    """PreToolUse hook returning None allows tool execution."""
+    from deepagent.core.hooks import HookSystem
+
+    cfg = make_config()
+    fake_llm = FakeLLMClient([
+        [ToolCallEvent(tool_calls=[
+            ToolCall(id="c1", name="echo", arguments={"message": "hi"})
+        ])],
+        [TextDelta(text="Executed.")],
+    ])
+    reg = make_registry()
+    hooks = HookSystem()
+
+    async def allow_all(**kwargs):
+        return None
+
+    hooks.register("PreToolUse", allow_all, priority=10, name="test-allower")
+    loop = AgentLoop(cfg, fake_llm, reg, hook_system=hooks)
+
+    events = []
+    async for event in loop.run("test"):
+        events.append(event)
+
+    result_events = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert result_events[0].result.success is True
+
+
+@pytest.mark.asyncio
+async def test_post_tool_use_hook_fires_after_execution():
+    """PostToolUse hook fires after successful tool execution."""
+    from deepagent.core.hooks import HookSystem
+
+    cfg = make_config()
+    fake_llm = FakeLLMClient([
+        [ToolCallEvent(tool_calls=[
+            ToolCall(id="c1", name="echo", arguments={"message": "hi"})
+        ])],
+        [TextDelta(text="Done.")],
+    ])
+    reg = make_registry()
+    hooks = HookSystem()
+    post_fired = []
+
+    async def record_post(tool_name, arguments, result, **kwargs):
+        post_fired.append((tool_name, result.success))
+        return None
+
+    hooks.register("PostToolUse", record_post, priority=10, name="test-recorder")
+    loop = AgentLoop(cfg, fake_llm, reg, hook_system=hooks)
+
+    async for _ in loop.run("test"):
+        pass
+
+    assert len(post_fired) == 1
+    assert post_fired[0] == ("echo", True)
+
+
+# ── ContextManager compaction integration (Phase 1) ───────────────
+
+
+def test_context_manager_compact_l2_l3_trims_messages():
+    """ContextManager.compact_l2_l3() delegates to Compactor for L2/L3."""
+    from deepagent.core.compaction import Compactor
+
+    ctx = ContextManager(compactor=Compactor())
+
+    # Add 60 messages (> MAX_MESSAGES_L2 = 50)
+    for i in range(60):
+        ctx.add_user_message(f"msg {i}")
+
+    assert ctx.message_count == 60
+    applied = ctx.compact_l2_l3()
+    assert applied is True
+    assert ctx.message_count < 60  # trimmed
+
+
+def test_context_manager_compact_skips_when_no_compactor():
+    """Without a compactor, compact_l2_l3() returns False."""
+    ctx = ContextManager()  # no compactor
+    ctx.add_user_message("hi")
+    assert ctx.compact_l2_l3() is False
+
+
+def test_context_manager_compact_with_tool_results():
+    """L3 compacts old tool results, keeps last 3 verbatim."""
+    from deepagent.core.compaction import Compactor
+    from deepagent.core.events import ToolResult
+
+    ctx = ContextManager(compactor=Compactor())
+    for i in range(6):
+        ctx.add_user_message(f"cmd {i}")
+        ctx.add_tool_result(f"tc_{i}", ToolResult(success=True, content=f"result {i}"))
+
+    assert ctx.message_count == 12
+    applied = ctx.compact_l2_l3()
+    # L3 should have fired (> 3 tool results), L2 likely not (12 < 50)
+    assert applied is True

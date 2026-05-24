@@ -27,6 +27,7 @@ from deepagent.core.events import (
 )
 from deepagent.tools.registry import ToolRegistry
 from deepagent.tools.protocol import SafetyLevel
+from deepagent.core.hooks import HookSystem, HookBlock
 
 
 class ConfirmationHandler(Protocol):
@@ -53,6 +54,7 @@ class AgentLoop:
         context: ContextManager | None = None,
         confirm_handler: ConfirmationHandler | None = None,
         memory_store=None,  # MemoryStore, duck typing
+        hook_system: HookSystem | None = None,
     ):
         self.config = config
         self._llm = llm_client
@@ -60,6 +62,7 @@ class AgentLoop:
         self._ctx = context or ContextManager()
         self._confirm = confirm_handler
         self._memory = memory_store
+        self._hooks = hook_system
         self._interrupted = False
 
     def interrupt(self) -> None:
@@ -97,7 +100,11 @@ class AgentLoop:
             pending_tool_calls: list = []
             reasoning_content: str | None = None
 
-            # Compression: prevent context overflow (rarely triggered with 1M window)
+            # L2/L3 compaction: cheap structural pruning (no LLM needed)
+            if self._ctx.compact_l2_l3():
+                yield ThinkingDelta(text="\n[Context trimmed — L2/L3 compaction applied]\n")
+
+            # L4 compression: prevent context overflow with LLM summary
             if self._ctx.is_near_limit():
                 boundary = self._ctx.compression_candidates()
                 if boundary > 0:
@@ -184,17 +191,45 @@ class AgentLoop:
                     except Exception as e:
                         return ToolResult(success=False, content="", error=str(e))
 
+                # PreToolUse hooks for readonly tools (deny check before parallel exec)
+                readonly_denied: dict[int, HookBlock] = {}
+                if self._hooks is not None:
+                    for i, tc in enumerate(readonly_calls):
+                        block = await self._hooks.trigger(
+                            "PreToolUse",
+                            tool_name=tc.name,
+                            arguments=tc.arguments,
+                            tool_call=tc,
+                        )
+                        if block is not None:
+                            readonly_denied[i] = block
+
                 results = await asyncio.gather(
                     *[_exec_readonly(tc) for tc in readonly_calls],
                     return_exceptions=True,
                 )
-                for tc, result in zip(readonly_calls, results):
-                    if isinstance(result, BaseException):
+                for i, (tc, result) in enumerate(zip(readonly_calls, results)):
+                    if i in readonly_denied:
+                        result = ToolResult(
+                            success=False,
+                            content=readonly_denied[i].reason,
+                            error="ExecutionDenied",
+                        )
+                    elif isinstance(result, BaseException):
                         result = ToolResult(
                             success=False, content="", error=str(result)
                         )
                     yield ToolResultEvent(tool_call=tc, result=result)
                     self._ctx.add_tool_result(tc.id, result)
+
+                    # PostToolUse hooks (fire-and-forget)
+                    if self._hooks is not None:
+                        await self._hooks.trigger(
+                            "PostToolUse",
+                            tool_name=tc.name,
+                            arguments=tc.arguments,
+                            result=result,
+                        )
 
             # ── 3b: Execute mutable (write/shell) tools sequentially ──
             for tc in mutable_calls:
@@ -212,26 +247,55 @@ class AgentLoop:
                     self._ctx.add_tool_result(tc.id, result)
                     continue
 
-                # Confirmation for shell-level tools
-                if (
-                    tool.tool_safety_level == SafetyLevel.SHELL
-                    and self._confirm is not None
-                ):
-                    approved = await self._confirm.confirm(tc.name, tc.arguments)
-                    if not approved:
-                        denied = ToolResult(
-                            success=False,
-                            content="Execution denied by user.",
-                            error="ExecutionDenied",
-                        )
-                        yield ToolResultEvent(tool_call=tc, result=denied)
-                        self._ctx.add_tool_result(tc.id, denied)
-                        continue
+                # ── PreToolUse hooks (Phase 1: replaces hardcoded permission) ──
+                denied: HookBlock | None = None
+                if self._hooks is not None:
+                    denied = await self._hooks.trigger(
+                        "PreToolUse",
+                        tool_name=tc.name,
+                        arguments=tc.arguments,
+                        tool_call=tc,
+                    )
 
-                yield ToolCallStartEvent(tool_call=tc)
-                result = await self._safe_execute(tc, tool)
-                yield ToolResultEvent(tool_call=tc, result=result)
-                self._ctx.add_tool_result(tc.id, result)
+                if denied is not None:
+                    # Hook denied the tool call — feed denial to LLM
+                    denied_result = ToolResult(
+                        success=False,
+                        content=denied.reason,
+                        error="ExecutionDenied",
+                    )
+                    yield ToolResultEvent(tool_call=tc, result=denied_result)
+                    self._ctx.add_tool_result(tc.id, denied_result)
+                else:
+                    # Fallback: old confirmation handler (no hook blocked)
+                    if (
+                        tool.tool_safety_level == SafetyLevel.SHELL
+                        and self._confirm is not None
+                    ):
+                        approved = await self._confirm.confirm(tc.name, tc.arguments)
+                        if not approved:
+                            denied_result = ToolResult(
+                                success=False,
+                                content="Execution denied by user.",
+                                error="ExecutionDenied",
+                            )
+                            yield ToolResultEvent(tool_call=tc, result=denied_result)
+                            self._ctx.add_tool_result(tc.id, denied_result)
+                            continue
+
+                    yield ToolCallStartEvent(tool_call=tc)
+                    result = await self._safe_execute(tc, tool)
+                    yield ToolResultEvent(tool_call=tc, result=result)
+                    self._ctx.add_tool_result(tc.id, result)
+
+                    # ── PostToolUse hooks (fire-and-forget) ──
+                    if self._hooks is not None:
+                        await self._hooks.trigger(
+                            "PostToolUse",
+                            tool_name=tc.name,
+                            arguments=tc.arguments,
+                            result=result,
+                        )
 
             # Loop continues → LLM sees tool results, decides next action
 
