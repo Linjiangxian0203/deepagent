@@ -285,6 +285,9 @@ async def run_cli(config: Config) -> None:
     memory_store = MemoryStore(memory_root)
     memory_context = memory_store.get_system_context()
 
+    from deepagent.tools.memory_tools import create_memory_tools
+    create_memory_tools(tool_registry, memory_store)
+
     session = PromptSession()
     confirm_handler = TerminalConfirmationHandler(session)
 
