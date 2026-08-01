@@ -69,7 +69,10 @@ def _categorize_tools(tool_names: list[str]) -> dict[str, list[str]]:
         "run_shell": "Shell",
         "grep": "Search", "glob": "Search", "web_search": "Search", "web_fetch": "Search",
         "git_diff": "Git", "git_log": "Git", "git_status": "Git",
+        "create_worktree": "Git", "remove_worktree": "Git", "keep_worktree": "Git",
         "delegate": "Agent",
+        "schedule_cron": "Cron", "list_crons": "Cron", "cancel_cron": "Cron",
+        "connect_mcp": "MCP", "list_mcp_servers": "MCP", "disconnect_mcp": "MCP",
     }
     result: dict[str, list[str]] = {}
     for name in sorted(tool_names):
@@ -80,7 +83,8 @@ def _categorize_tools(tool_names: list[str]) -> dict[str, list[str]]:
 
 _CATEGORY_COLORS: dict[str, str] = {
     "File": "cyan", "Shell": "yellow", "Search": "green",
-    "Git": "magenta", "Agent": "blue",
+    "Git": "magenta", "Agent": "blue", "Cron": "bright_black",
+    "MCP": "bright_blue",
 }
 
 
@@ -298,6 +302,12 @@ async def run_cli(config: Config) -> None:
 
     from deepagent.core.message_bus import MessageBus
     from deepagent.tools.team_tools import create_team_tools
+    from deepagent.core.cron import CronScheduler
+    from deepagent.tools.cron_tools import create_cron_tools
+    from deepagent.core.worktree import WorktreeManager
+    from deepagent.tools.worktree_tools import create_worktree_tools
+    from deepagent.core.mcp_client import MCPManager
+    from deepagent.tools.mcp_tools import create_mcp_tools
 
     mailboxes_dir = Path(project_root) / ".mailboxes"
     message_bus = MessageBus(str(mailboxes_dir))
@@ -312,6 +322,19 @@ async def run_cli(config: Config) -> None:
 
     create_team_tools(tool_registry, message_bus, llm_client, tool_registry,
                       cwd=project_root, task_mgr=task_mgr)
+
+    # Cron scheduler
+    cron_scheduler = CronScheduler(Path(project_root) / ".scheduled_tasks.json")
+    await cron_scheduler.start()
+    create_cron_tools(tool_registry, cron_scheduler)
+
+    # Worktree manager
+    worktree_mgr = WorktreeManager(project_root)
+    create_worktree_tools(tool_registry, worktree_mgr)
+
+    # MCP manager — dynamic tool registration
+    mcp_manager = MCPManager(tool_registry)
+    create_mcp_tools(tool_registry, mcp_manager)
 
     session = PromptSession()
     confirm_handler = TerminalConfirmationHandler(session)
@@ -404,6 +427,7 @@ async def run_cli(config: Config) -> None:
             memory_store=memory_store,
             background_mgr=background_mgr,
             message_bus=message_bus,
+            cron_scheduler=cron_scheduler,
         )
 
         in_thinking = False

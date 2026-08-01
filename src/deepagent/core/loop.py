@@ -57,6 +57,7 @@ class AgentLoop:
         hook_system: HookSystem | None = None,
         background_mgr=None,  # BackgroundManager, duck typing
         message_bus=None,  # MessageBus, duck typing
+        cron_scheduler=None,  # CronScheduler, duck typing
     ):
         self.config = config
         self._llm = llm_client
@@ -67,6 +68,7 @@ class AgentLoop:
         self._hooks = hook_system
         self._bg_mgr = background_mgr
         self._bus = message_bus
+        self._cron_scheduler = cron_scheduler
         self._interrupted = False
         self._rounds_since_todo = 0
 
@@ -98,6 +100,14 @@ class AgentLoop:
                          for m in inbox_msgs]
                 inbox_text = "\n".join(lines)
                 self._ctx.add_user_message(f"[Inbox — {len(inbox_msgs)} message(s)]\n{inbox_text}")
+
+        # Inject cron-fired jobs
+        if self._cron_scheduler is not None:
+            while True:
+                job = await self._cron_scheduler.consume()
+                if job is None:
+                    break
+                self._ctx.add_user_message(f"[Scheduled cron job] {job.prompt}")
 
         # L3: refresh long-term memory and inject into system prompt
         if self._memory is not None and self._memory.needs_refresh():

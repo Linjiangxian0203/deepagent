@@ -3,7 +3,8 @@ from collections.abc import Callable
 import functools
 import inspect
 import json
-from typing import Any, get_type_hints
+import types as _types
+from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from deepagent.tools.protocol import SafetyLevel
 
@@ -41,7 +42,13 @@ class ToolRegistry:
 def _type_to_json_schema(t: type) -> str:
     """Python type -> JSON Schema type string."""
     mapping = {int: "integer", float: "number", str: "string", bool: "boolean", list: "array", dict: "object"}
-    origin = getattr(t, "__origin__", None)
+    origin = get_origin(t)
+    if origin in (Union, _types.UnionType):
+        # X | None → use the non-None member's schema
+        args = [a for a in get_args(t) if a is not type(None)]
+        if len(args) == 1:
+            return _type_to_json_schema(args[0])
+        return "string"  # fallback for complex unions
     if origin is not None:
         return "array" if origin is list else "string"
     return mapping.get(t, "string")

@@ -44,6 +44,7 @@ class Task:
     owner: str | None
     blocked_by: list[str]
     metadata: dict
+    worktree: str | None = None
 
     @classmethod
     def create(
